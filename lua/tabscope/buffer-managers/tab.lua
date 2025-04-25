@@ -215,6 +215,86 @@ local function new(tracked_buffers)
   u.on_event("TabClosed", m._tab_closed_handler)
   m._tracked_buffers.on_buf_removed("tab-buffers", m._buffer_removed_handler)
 
+  --- Returns a list of buffer IDs for the specified tab.
+  ---@param tab_id number The ID of the tab.
+  ---@return number[] List of buffer IDs.
+  m.get_buffers_for_tab = function(tab_id)
+    local buffers_for_tab = m._buffers_by_tab[tab_id]
+    if buffers_for_tab == nil then
+      return {} -- Return empty list if tab not found or has no buffers
+    end
+
+    local buffer_list = {}
+    for buffer_id, _ in pairs(buffers_for_tab) do
+      table.insert(buffer_list, buffer_id)
+    end
+    -- Optional: Sort the list for consistency
+    table.sort(buffer_list)
+    return buffer_list
+  end
+
+  --- Removes buffer from specified tab (defaults to current tab if not provided)
+  ---@param id number @ buffer to remove
+  ---@param tab number|nil @ tab to remove buffer from (defaults to current tab)
+  m.remove_tab_buffer_from_tab = function(id, tab)
+    if id == nil or id == 0 then
+      id = vim.api.nvim_get_current_buf()
+    end
+
+    -- Default to current tab if not specified
+    tab = tab or vim.api.nvim_get_current_tabpage()
+
+    -- Check if the buffer is managed by the plugin.
+    if not m._buffers_by_tab[tab][id] then
+      if vim.fn.buflisted(id) == 1 then
+        vim.bo[id].buflisted = false
+      end
+      return
+    end
+
+    local show_another_buffer_for_window = function(tab_id, win)
+      local another_buffer_to_show = -1
+      for buffer, _ in pairs(m._buffers_by_tab[tab_id]) do
+        if buffer ~= id then
+          another_buffer_to_show = buffer
+          break
+        end
+      end
+
+      if another_buffer_to_show == -1 then
+        another_buffer_to_show = vim.api.nvim_create_buf(true, true)
+      end
+
+      vim.api.nvim_win_set_buf(win, another_buffer_to_show)
+    end
+
+    -- Shows another buffer for windows in specified tab with removed buffer.
+    local wins = vim.api.nvim_tabpage_list_wins(tab)
+    for _, win in ipairs(wins) do
+      if id == vim.api.nvim_win_get_buf(win) then
+        show_another_buffer_for_window(tab, win)
+      end
+    end
+
+    m._buffers_by_tab[tab][id] = nil
+
+    -- Checks if the buffer is orphan now.
+    local orphan = true
+    for _, buffers in pairs(m._buffers_by_tab) do
+      for buffer, _ in pairs(buffers) do
+        if id == buffer then
+          orphan = false
+        end
+      end
+    end
+
+    if orphan then
+      m._tracked_buffers.remove(id)
+    else
+      m._tracked_buffers.hide(id)
+    end
+  end
+
   return m
 end
 
